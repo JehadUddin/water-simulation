@@ -6,7 +6,7 @@ import React from 'react';
 import { motion } from 'framer-motion';
 import { useTheme } from '../../Theme.tsx';
 import TextArea from '../Core/TextArea.tsx';
-import { MetaButtonProps } from '../../types/index.tsx';
+import { WaterConfig } from '../../types/index.tsx';
 
 interface CodePanelProps {
   codeText: string;
@@ -14,10 +14,10 @@ interface CodePanelProps {
   onCopyCode: () => void;
   onFocus: () => void;
   onBlur: () => void;
-  btnProps: MetaButtonProps;
+  waterConfig: WaterConfig;
 }
 
-const CodePanel: React.FC<CodePanelProps> = ({ codeText, onCodeChange, onCopyCode, onFocus, onBlur, btnProps }) => {
+const CodePanel: React.FC<CodePanelProps> = ({ codeText, onCodeChange, onCopyCode, onFocus, onBlur, waterConfig }) => {
   const { theme } = useTheme();
 
   return (
@@ -51,7 +51,7 @@ const CodePanel: React.FC<CodePanelProps> = ({ codeText, onCodeChange, onCopyCod
       <div style={{ marginTop: theme.spacing['Space.L'] }}>
         <p style={{ ...theme.Type.Readable.Label.S, color: theme.Color.Base.Content[2], marginBottom: theme.spacing['Space.S'] }}>REACT USAGE</p>
         <pre style={{ ...theme.Type.Expressive.Data, fontSize: '11px', color: theme.Color.Base.Content[2], backgroundColor: 'transparent', padding: 0, margin: 0, whiteSpace: 'pre-wrap' }}>
-          {`<Button\n  label="${btnProps.label}"\n  variant="${btnProps.variant}"\n  size="${btnProps.size}"\n  icon="${btnProps.icon}"\n  customRadius="${btnProps.customRadius}"\n/>`}
+          {`<WaterScene\n  config={{\n    colorDeep: "${waterConfig.colorDeep}",\n    colorShallow: "${waterConfig.colorShallow}",\n    waveHeight: ${waterConfig.waveHeight},\n    waveSpeed: ${waterConfig.waveSpeed},\n    roughness: ${waterConfig.roughness}\n  }}\n/>`}
         </pre>
       </div>
     </>

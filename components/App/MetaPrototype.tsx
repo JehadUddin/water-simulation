@@ -107,9 +107,10 @@ const MetaPrototype = () => {
   
   useEffect(() => {
     if (!isCodeFocused) {
-      setCodeText(JSON.stringify(btnProps, null, 2));
+      // Switched to WaterConfig as it's the active visualization
+      setCodeText(JSON.stringify(waterConfig, null, 2));
     }
-  }, [btnProps, isCodeFocused]);
+  }, [waterConfig, isCodeFocused]);
 
   // -- Actions --
 
@@ -139,7 +140,7 @@ const MetaPrototype = () => {
 
   const updateWaterConfig = (updates: Partial<WaterConfig>) => {
     setWaterConfig(prev => ({ ...prev, ...updates }));
-    // logEvent('Water updated'); // Optional: can be noisy
+    logEvent(`Water updated: ${Object.keys(updates).join(', ')}`);
   };
 
   const handleUndo = () => {
@@ -183,7 +184,7 @@ const MetaPrototype = () => {
   };
 
   const handleCopyCode = () => {
-    navigator.clipboard.writeText(JSON.stringify(btnProps, null, 2));
+    navigator.clipboard.writeText(codeText);
     logEvent('JSON copied to clipboard');
   };
   
@@ -206,7 +207,8 @@ const MetaPrototype = () => {
     setCodeText(newVal);
     try {
       const parsed = JSON.parse(newVal);
-      updateBtnProps(parsed, true);
+      // Now updating WaterConfig
+      updateWaterConfig(parsed);
     } catch (err) {
       // Invalid JSON, just update text
     }
@@ -299,7 +301,7 @@ const MetaPrototype = () => {
               onCopyCode={handleCopyCode}
               onFocus={() => setIsCodeFocused(true)}
               onBlur={() => setIsCodeFocused(false)}
-              btnProps={btnProps}
+              waterConfig={waterConfig}
             />
           </FloatingWindow>
         )}
