@@ -1,3 +1,4 @@
+
 /**
  * @license
  * SPDX-License-Identifier: Apache-2.0
@@ -42,13 +43,20 @@ export interface MetaButtonProps {
 
 // --- Water Simulation Props ---
 export interface WaterConfig {
+  // Visuals
   colorShallow: string;
   colorDeep: string;
-  foamColor: string; // New
+  foamColor: string;
   transparency: number; // 0-1
   roughness: number; // 0-1
   waveHeight: number; // 0-5
   waveSpeed: number; // 0-2
   waveScale: number; // 0-50
   normalFlatness: number; // 0-100
+  
+  // Ripple Physics
+  rippleDamping: number; // 0.9 - 0.999
+  rippleStrength: number; // 0.01 - 1.0
+  rippleRadius: number; // 0.01 - 0.2
+  rippleIntensity: number; // 0.1 - 5.0
 }

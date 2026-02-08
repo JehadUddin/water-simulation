@@ -1,3 +1,4 @@
+
 /**
  * @license
  * SPDX-License-Identifier: Apache-2.0
@@ -11,148 +12,77 @@ interface WaterSceneProps {
   config: WaterConfig;
 }
 
-// --- SUBNAUTICA-STYLE OCEAN SHADERS ---
-// Modern Game Techniques:
-// 1. "Infinite Grid" -> 9-Tile LOD System following the camera.
-// 2. "Vertex Density" -> High detail center tile, optimized outer tiles.
-// 3. "Surface Foam" -> Jacobian-based foam accumulation at wave peaks.
-// 4. "SSS" -> View-dependent and height-dependent light scattering.
+// --- RIPPLE SIMULATION SHADERS ---
 
-const waterVertexShader = `
-precision highp float;
-
-uniform float uTime;
-uniform float uWaveHeight;
-uniform float uWaveSpeed;
-uniform float uWaveScale;
-uniform float uRoughness; // Used as Steepness Multiplier
-
-varying vec3 vWorldPos;
-varying vec3 vViewPosition;
-varying vec3 vNormal;
-varying float vElevation;
-varying float vFoam;
-
-// Gerstner Wave Calculation
-// Accumulates Position (P), Normal (N), and Foam factor
-void calculateWave(
-    vec2 dir,           // Direction (normalized)
-    float wavelength,   // Length
-    float speed,        // Speed
-    float steepness,    // 0..1 (Controlled by uRoughness)
-    float amplitude,    // Height
-    inout vec3 P, 
-    inout vec3 N,
-    inout float foamAccum
-) {
-    float k = 6.28318 / wavelength; // Wavenumber
-    float c = sqrt(9.8 / k);        // Phase speed
-    float w = k * c;                // Angular frequency
-    
-    // Phase
-    float f = k * (dot(dir, P.xz) - w * uTime * speed);
-    
-    // Optimization: Precompute trig
-    float sinf = sin(f);
-    float cosf = cos(f);
-
-    // Steepness constraint:
-    // To avoid loops, Sum(Q * A * k) should be < 1. 
-    // We scale Q based on A and k to be safe.
-    // Q = steepness / (amplitude * k * TOTAL_WAVES)
-    float Q = steepness / (k * amplitude * 1.5); // 1.5 is a safety factor
-    
-    // Displacement
-    float wa = k * amplitude;
-    float qa = Q * amplitude;
-    
-    P.x -= dir.x * qa * sinf;
-    P.z -= dir.y * qa * sinf;
-    P.y += amplitude * cosf;
-
-    // Normal Derivatives
-    // dH/dx = -dir.x * wa * sinf
-    // dH/dz = -dir.y * wa * sinf
-    // Vertical compression = 1 - Q * wa * cosf
-    
-    float wa_sin = wa * sinf;
-    float wa_cos = wa * cosf;
-    
-    N.x -= dir.x * wa_sin;
-    N.z -= dir.y * wa_sin;
-    N.y -= Q * wa_cos;
-    
-    // Foam: Accumulate based on "pinching" (Jacobian approximation)
-    // When waves bunch up, Jacobian < 0 -> foam.
-    foamAccum += max(0.0, 1.0 - Q * wa_cos); // Basic Jacobian-like metric
-}
-
+const rippleVertexShader = `
+varying vec2 vUv;
 void main() {
-    // IMPORTANT: To support infinite ocean, we use the world position for wave calculations.
-    // This allows the mesh to slide (follow player) while waves stay in place.
-    vec4 worldPosition = modelMatrix * vec4(position, 1.0);
-    vec3 finalPos = worldPosition.xyz;
-    
-    vec3 normalAccum = vec3(0.0, 1.0, 0.0); // Start with Up normal
-    float foamAccum = 0.0;
-    
-    // Config Multipliers
-    float h = uWaveHeight;
-    float s = uWaveSpeed;
-    float sc = max(0.1, uWaveScale);
-    float st = clamp(uRoughness, 0.0, 0.8); // Clamp steepness to avoid black folding
-    
-    // --- WAVE SPECTRUM (Prime Numbers & Irregular Angles to break Grid) ---
-    // We use a specific set of waves that don't harmonically align.
-    
-    // Wave 1: Main Swell (Angle 0)
-    calculateWave(normalize(vec2(1.0, 0.1)), 100.0 * sc, 1.0 * s, st, 2.0 * h, finalPos, normalAccum, foamAccum);
-    
-    // Wave 2: Crossing Swell (Angle ~60)
-    calculateWave(normalize(vec2(0.5, 0.866)), 53.0 * sc, 1.1 * s, st, 0.9 * h, finalPos, normalAccum, foamAccum);
-    
-    // Wave 3: Chop (Angle ~130)
-    calculateWave(normalize(vec2(-0.64, 0.76)), 29.0 * sc, 1.2 * s, st, 0.5 * h, finalPos, normalAccum, foamAccum);
-    
-    // Wave 4: Detail (Angle ~210)
-    calculateWave(normalize(vec2(-0.86, -0.5)), 17.0 * sc, 1.4 * s, st, 0.25 * h, finalPos, normalAccum, foamAccum);
-    
-    // Wave 5: Micro (Angle ~310)
-    calculateWave(normalize(vec2(0.64, -0.76)), 9.0 * sc, 1.8 * s, st, 0.1 * h, finalPos, normalAccum, foamAccum);
-
-    // Normalize Final Normal
-    vec3 N = normalize(vec3(normalAccum.x, normalAccum.y, normalAccum.z));
-    
-    vNormal = N;
-    vWorldPos = finalPos; // Use the wave-displaced position for fragments
-    vElevation = finalPos.y;
-    vFoam = smoothstep(3.5, 5.0, foamAccum); // Threshold foam based on Jacobian
-    
-    vec4 mvPosition = viewMatrix * vec4(finalPos, 1.0);
-    vViewPosition = -mvPosition.xyz;
-    gl_Position = projectionMatrix * mvPosition;
+    vUv = uv;
+    gl_Position = vec4(position, 1.0);
 }
 `;
 
-const waterFragmentShader = `
+const rippleFragmentShader = `
 precision highp float;
+uniform sampler2D uTexture;
+uniform vec2 uResolution;
+uniform float uDamping;
 
-uniform vec3 uColorDeep;
-uniform vec3 uColorShallow;
-uniform vec3 uFoamColor;
-uniform vec3 uSunPosition;
-uniform float uTime;
+varying vec2 vUv;
 
-varying vec3 vWorldPos;
-varying vec3 vViewPosition;
-varying vec3 vNormal;
-varying float vElevation;
-varying float vFoam;
+void main() {
+    vec2 pixel = 1.0 / uResolution;
+    
+    // Sample neighbors
+    float left = texture2D(uTexture, vUv + vec2(-pixel.x, 0.0)).r;
+    float right = texture2D(uTexture, vUv + vec2(pixel.x, 0.0)).r;
+    float up = texture2D(uTexture, vUv + vec2(0.0, -pixel.y)).r;
+    float down = texture2D(uTexture, vUv + vec2(0.0, pixel.y)).r;
+    
+    vec4 current = texture2D(uTexture, vUv);
+    
+    // Wave equation: Acceleration = Laplacian * Speed
+    // Simplified: (Average of neighbors - Current) * Speed
+    float average = (left + right + up + down) * 0.25;
+    float vel = (average - current.r) * 2.0;
+    
+    // Apply velocity to height (R channel) and damp velocity (G channel)
+    current.g = (current.g + vel) * uDamping;
+    current.r += current.g;
+    
+    // Prevent runaway
+    current.r *= 0.995; 
+    
+    gl_FragColor = current;
+}
+`;
 
-const vec3 SUN_COLOR = vec3(1.0, 0.95, 0.9);
-const vec3 AMBIENT_COLOR = vec3(0.05, 0.1, 0.15); // Balanced ambient
+const rippleDropFragmentShader = `
+precision highp float;
+uniform sampler2D uTexture;
+uniform vec2 uCenter;
+uniform float uRadius;
+uniform float uStrength;
 
-// --- SIMPLEX NOISE ---
+varying vec2 vUv;
+
+void main() {
+    vec4 info = texture2D(uTexture, vUv);
+    
+    float dist = distance(vUv, uCenter);
+    if (dist < uRadius) {
+        // Smooth drop shape
+        float drop = pow(max(0.0, 1.0 - dist / uRadius), 2.0);
+        info.r -= drop * uStrength; // Negative for depression, or positive for peak
+        info.g -= drop * uStrength * 0.5; // Add some impulse
+    }
+    
+    gl_FragColor = info;
+}
+`;
+
+// --- NOISE FUNCTIONS (Shared) ---
+const noiseCommon = `
 vec3 permute(vec3 x) { return mod(((x*34.0)+1.0)*x, 289.0); }
 
 float snoise(vec2 v){
@@ -180,117 +110,280 @@ float snoise(vec2 v){
   g.yz = a0.yz * x12.xz + h.yz * x12.yw;
   return 130.0 * dot(m, g);
 }
+`;
 
-// --- FBM ---
-float fbm(vec2 x) {
-    float v = 0.0;
-    float a = 0.5;
-    vec2 shift = vec2(100.0);
-    // Rotate to reduce axial bias
-    mat2 rot = mat2(cos(0.5), sin(0.5), -sin(0.5), cos(0.50));
-    for (int i = 0; i < 4; ++i) {
-        v += a * snoise(x);
-        x = rot * x * 2.0 + shift;
-        a *= 0.5;
-    }
-    return v;
+// --- VERTEX SHADER ---
+const waterVertexShader = `
+precision highp float;
+
+uniform float uTime;
+uniform float uWaveHeight;
+uniform float uWaveSpeed;
+uniform float uWaveScale;
+uniform float uRoughness;
+
+// Ripple Uniforms
+uniform sampler2D tRipple;
+uniform vec2 uRippleCenter;
+uniform float uRippleSize;
+uniform float uRippleIntensity;
+
+varying vec3 vWorldPos;
+varying vec3 vViewPosition;
+varying vec3 vNormal;
+varying float vElevation;
+varying float vDepth; 
+
+${noiseCommon}
+
+float getShoaling(vec2 pos) {
+    float noiseVal = snoise(pos * 0.0005); 
+    return smoothstep(-0.5, 0.6, noiseVal); 
 }
 
-// Sky Color Gradient
+void calculateWave(
+    vec2 dir, float wavelength, float speed, float amplitude, float seed,
+    inout vec3 P, inout vec3 N, float shoalingFactor
+) {
+    float activeAmp = amplitude * mix(1.0, 2.5, shoalingFactor * 0.5); 
+    float activeSpeed = speed * mix(1.0, 0.6, shoalingFactor); 
+
+    float k = 6.28318 / wavelength; 
+    float w = k * activeSpeed;
+    
+    float phase = dot(dir, P.xz) * k + uTime * w + seed;
+    float sinp = sin(phase);
+    float cosp = cos(phase);
+
+    float steepness = mix(uRoughness, uRoughness * 0.5, shoalingFactor);
+    float Q = steepness / (k * activeAmp * 4.0); 
+
+    float qa = Q * activeAmp;
+    float wa = k * activeAmp;
+
+    P.x -= dir.x * qa * sinp;
+    P.z -= dir.y * qa * sinp;
+    P.y += activeAmp * cosp;
+
+    float wa_cos = wa * cosp;
+    float wa_sin = wa * sinp;
+
+    N.x -= dir.x * wa_sin;
+    N.z -= dir.y * wa_sin;
+    N.y -= wa_cos; 
+}
+
+void main() {
+    vec4 worldPosition = modelMatrix * vec4(position, 1.0);
+    vec3 finalPos = worldPosition.xyz;
+    
+    float shoaling = getShoaling(finalPos.xz);
+    vDepth = shoaling;
+
+    vec3 normalAccum = vec3(0.0, 1.0, 0.0);
+    
+    float h = uWaveHeight;
+    float s = uWaveSpeed;
+    float sc = max(0.1, uWaveScale);
+
+    // Sum of amplitudes: 3.5 + 1.8 + 1.4 + 0.7 + 0.3 + 0.2 = ~7.9
+    // This multiplier setup creates rich detailed waves
+    calculateWave(normalize(vec2(1.0, 0.1)), 160.0 * sc, 0.8 * s, 3.5 * h, 0.0, finalPos, normalAccum, shoaling);
+    calculateWave(normalize(vec2(0.6, 0.7)), 90.0 * sc, 1.0 * s, 1.8 * h, 12.34, finalPos, normalAccum, shoaling);
+    calculateWave(normalize(vec2(0.9, -0.4)), 75.0 * sc, 0.9 * s, 1.4 * h, 45.12, finalPos, normalAccum, shoaling);
+    calculateWave(normalize(vec2(0.8, 0.4)), 35.0 * sc, 1.4 * s, 0.7 * h, 99.99, finalPos, normalAccum, shoaling);
+    calculateWave(normalize(vec2(0.5, 0.8)), 18.0 * sc, 1.7 * s, 0.3 * h, 137.5, finalPos, normalAccum, shoaling);
+    calculateWave(normalize(vec2(0.7, -0.6)), 12.0 * sc, 1.9 * s, 0.2 * h, 256.0, finalPos, normalAccum, shoaling);
+
+    // --- INTERACTIVE RIPPLE DISPLACEMENT ---
+    vec2 rippleUV = (finalPos.xz - uRippleCenter) / uRippleSize + 0.5;
+    
+    if (rippleUV.x >= 0.0 && rippleUV.x <= 1.0 && rippleUV.y >= 0.0 && rippleUV.y <= 1.0) {
+        float rippleH = texture2D(tRipple, rippleUV).r * uRippleIntensity;
+        finalPos.y += rippleH;
+
+        float offset = 1.0 / 256.0; 
+        float hL = texture2D(tRipple, rippleUV + vec2(-offset, 0.0)).r * uRippleIntensity;
+        float hR = texture2D(tRipple, rippleUV + vec2(offset, 0.0)).r * uRippleIntensity;
+        float hD = texture2D(tRipple, rippleUV + vec2(0.0, -offset)).r * uRippleIntensity;
+        float hU = texture2D(tRipple, rippleUV + vec2(0.0, offset)).r * uRippleIntensity;
+
+        vec3 rippleNormal = normalize(vec3(hL - hR, 2.0, hD - hU)); 
+        normalAccum = normalize(normalAccum + (rippleNormal - vec3(0,1,0)) * 0.5);
+    }
+
+    vNormal = normalize(normalAccum);
+    vWorldPos = finalPos; 
+    vElevation = finalPos.y;
+    
+    vec4 mvPosition = viewMatrix * vec4(finalPos, 1.0);
+    vViewPosition = -mvPosition.xyz;
+    gl_Position = projectionMatrix * mvPosition;
+}
+`;
+
+// --- FRAGMENT SHADER ---
+const waterFragmentShader = `
+precision highp float;
+
+uniform vec3 uColorDeep;
+uniform vec3 uColorShallow;
+uniform vec3 uFoamColor;
+uniform vec3 uSunPosition;
+uniform float uTime;
+uniform float uWaveHeight;
+uniform sampler2D tBackground; 
+uniform vec2 uResolution;      
+uniform float uRoughness;
+
+varying vec3 vWorldPos;
+varying vec3 vViewPosition;
+varying vec3 vNormal;
+varying float vElevation;
+varying float vDepth; 
+
+${noiseCommon}
+
 vec3 getSkyColor(vec3 rd) {
     vec3 sunDir = normalize(uSunPosition);
     float sunDot = max(dot(rd, sunDir), 0.0);
-    // Horizon to Zenith
     vec3 col = mix(vec3(0.6, 0.7, 0.8), vec3(0.1, 0.3, 0.6), rd.y * 0.5 + 0.5);
-    // Sun Glare
-    col += 0.8 * SUN_COLOR * pow(sunDot, 120.0);
+    col += 0.8 * vec3(1.0, 0.95, 0.9) * pow(sunDot, 120.0);
     return col;
+}
+
+vec3 applyMicroNormals(vec3 geomNormal, vec3 worldPos, float time) {
+    vec2 uv = worldPos.xz;
+    vec2 uv1 = uv * 0.5 + vec2(time * 0.5, time * 0.2);
+    float n1 = snoise(uv1);
+    vec2 uv2 = uv * 1.5 - vec2(time * 0.4, time * 0.6);
+    float n2 = snoise(uv2);
+    vec3 microBump = vec3(n1, 8.0 / max(0.01, uRoughness), n2);
+    return normalize(geomNormal + (microBump - 0.5) * 0.3);
 }
 
 void main() {
     vec3 viewDir = normalize(vViewPosition);
     vec3 sunDir = normalize(uSunPosition);
-    vec3 baseNormal = normalize(vNormal);
+    float dist = length(vViewPosition); 
 
-    // --- 1. SURFACE MICRO-DETAIL ---
-    // Use FBM for realistic ripples and calculate gradient for normal perturbation
-    float timeScale = 0.4;
-    vec2 uv = vWorldPos.xz * 0.08; // Detail scale
-    
-    // Layer 1
-    float h1 = fbm(uv + uTime * timeScale * vec2(0.1, 0.1));
-    // Layer 2
-    float h2 = fbm(uv * 2.5 - uTime * timeScale * vec2(0.2, 0.1));
-    
-    float heightMap = h1 * 0.6 + h2 * 0.4;
-    
-    // Compute Gradient (Finite Difference)
-    vec2 epsilon = vec2(0.1, 0.0);
-    float h_x = fbm((uv + epsilon) + uTime * timeScale * vec2(0.1, 0.1)) * 0.6 + 
-                fbm((uv + epsilon) * 2.5 - uTime * timeScale * vec2(0.2, 0.1)) * 0.4;
-    float h_y = fbm((uv + epsilon.yx) + uTime * timeScale * vec2(0.1, 0.1)) * 0.6 + 
-                fbm((uv + epsilon.yx) * 2.5 - uTime * timeScale * vec2(0.2, 0.1)) * 0.4;
-                
-    vec3 normalPerturb = normalize(vec3(heightMap - h_x, 8.0, heightMap - h_y)); // 8.0 controls bump strength (Higher = Smoother)
-    
-    // Combine with base normal (Gerstner)
-    vec3 finalNormal = normalize(baseNormal + (normalPerturb - vec3(0,1,0)) * 0.4);
+    vec3 normal = normalize(vNormal);
+    normal = applyMicroNormals(normal, vWorldPos, uTime);
 
-    // --- 2. LIGHTING MODEL ---
+    // --- IMPROVED FOAM LOGIC ---
     
-    // Specular
-    vec3 H = normalize(sunDir + viewDir);
-    float NdotH = max(dot(finalNormal, H), 0.0);
-    float specPower = 400.0; // Sharp highlights
-    float specular = pow(NdotH, specPower);
+    // 1. Better Bubble Texture (Higher Frequency, more organic)
+    vec2 foamUV = vWorldPos.xz * 1.2; 
+    vec2 flow = vec2(uTime * 0.08, uTime * 0.04); 
+
+    float f1 = snoise(foamUV + flow);
+    float f2 = snoise(foamUV * 2.0 - flow * 1.5);
     
-    // Fresnel
-    float F0 = 0.02; 
-    float NdotV = max(dot(finalNormal, viewDir), 0.0);
-    float fresnel = F0 + (1.0 - F0) * pow(1.0 - NdotV, 5.0);
+    // Organic cellular look
+    float bubbles = (0.5 + 0.5 * f1) * (0.5 + 0.5 * f2);
+    bubbles = pow(bubbles, 2.0); // Sharpen
+    bubbles = smoothstep(0.3, 0.8, bubbles);
+
+    // 2. Adaptive Thresholds based on Wave Height scale
+    // Calculate slope intensity relative to wave height to maintain consistent foam coverage
+    // dFdx/dFdy give screen space derivatives, but we want world space feel.
+    // Length of gradient approximates slope.
+    float slope = length(vec2(dFdx(vElevation), dFdy(vElevation)));
     
-    // SSS (Subsurface Scattering)
-    // Enhances light passing through wave peaks and view-dependent depth.
-    float LdotV = dot(-sunDir, viewDir);
-    float sss = max(0.0, LdotV) * 0.4 + 0.1; 
-    sss += max(0.0, vElevation * 0.2); 
+    // Normalize slope by wave height so increasing height doesn't just fill screen with foam
+    float normalizedSlope = slope / max(0.01, uWaveHeight);
+
+    // Estimate max probable height based on vertex shader amplitudes (~8x base height)
+    float probableMaxHeight = uWaveHeight * 6.0;
     
-    // --- 3. COLOR COMPOSITION ---
+    float crestBase = probableMaxHeight * 0.55; 
+    float breakNoise = snoise(vWorldPos.xz * 0.03 + uTime * 0.05);
     
-    // Base Mix
-    float mixFactor = (finalNormal.y * 0.5 + 0.5) + (vElevation * 0.1);
-    vec3 albedo = mix(uColorDeep, uColorShallow, clamp(mixFactor, 0.0, 1.0));
+    // Elevation Mask: Trigger near tops
+    float elevationMask = smoothstep(crestBase + breakNoise * uWaveHeight, probableMaxHeight, vElevation);
     
-    // Light Accumulation
-    float NdotL = max(dot(finalNormal, sunDir), 0.0);
-    vec3 diffuse = albedo * NdotL * SUN_COLOR;
-    vec3 ambient = albedo * AMBIENT_COLOR;
-    vec3 scatterLight = uColorShallow * sss * 0.6; // Strengthen SSS for that "tropical" look
+    // Slope Mask: Trigger on steep faces (normalized)
+    float slopeMask = smoothstep(0.05, 0.15, normalizedSlope); 
     
-    vec3 waterBodyColor = ambient + diffuse + scatterLight;
+    float crestFoam = elevationMask;
     
-    // Reflection
-    vec3 refDir = reflect(-viewDir, finalNormal);
+    // Add foam to steep slopes (breaking waves), but weight it lower than top crests
+    crestFoam += slopeMask * 0.3;
+    crestFoam = clamp(crestFoam, 0.0, 1.0);
+
+    // 3. Shore/Depth Foam
+    float tide = sin(uTime * 0.4 + vWorldPos.x * 0.05) * 0.08 
+               + cos(uTime * 0.3 + vWorldPos.z * 0.05) * 0.08;
+    
+    float edgeFoam = smoothstep(0.85 + tide, 1.0, vDepth);
+    float washFoam = smoothstep(0.6 + tide, 0.95, vDepth) * 0.6;
+
+    // Combine
+    float foamIntensity = max(crestFoam, max(edgeFoam, washFoam));
+    
+    // Apply bubble pattern to the foam intensity
+    // Mix solid foam at very high intensity with bubbles at medium intensity
+    float finalFoam = mix(bubbles * foamIntensity, 1.0, smoothstep(0.8, 1.0, foamIntensity));
+    
+    float distFade = 1.0 - smoothstep(100.0, 800.0, dist);
+    finalFoam *= distFade;
+
+    // --- LIGHTING & COLOR ---
+
+    float NdotV = max(dot(viewDir, normal), 0.0);
+    float fresnel = 0.02 + 0.98 * pow(1.0 - NdotV, 5.0);
+
+    vec2 screenUV = gl_FragCoord.xy / uResolution;
+    vec2 refractUV = screenUV + normal.xz * 0.015; 
+    vec3 refractedColor = texture2D(tBackground, refractUV).rgb;
+
+    float opticalDepth = dist;
+    vec3 absorptionCoeffs = vec3(0.012, 0.004, 0.001);
+    vec3 transmittance = exp(-opticalDepth * absorptionCoeffs);
+
+    float heightMix = smoothstep(-uWaveHeight, uWaveHeight * 0.6, vElevation);
+    float depthMix = smoothstep(0.0, 0.9, vDepth);
+    float churnMix = foamIntensity * 0.25; 
+    
+    float totalColorMix = clamp(heightMix * 0.4 + depthMix * 0.6 + churnMix, 0.0, 1.0);
+    vec3 waterVolumeColor = mix(uColorDeep, uColorShallow, totalColorMix);
+
+    vec3 underwater = refractedColor * waterVolumeColor * transmittance * 1.5;
+
+    float sunViewDot = max(0.0, dot(viewDir, -sunDir));
+    float backlight = pow(sunViewDot, 8.0); 
+    
+    float thickness = smoothstep(-0.5, uWaveHeight, vElevation);
+    
+    float ambientScatter = smoothstep(0.0, 1.0, vElevation) * 0.3;
+    float shoreScatter = vDepth * 0.6; 
+    
+    float scatterTotal = (backlight * 3.0) + ambientScatter + shoreScatter;
+    
+    vec3 sssColor = mix(uColorDeep, uColorShallow, clamp(thickness + shoreScatter * 0.5, 0.0, 1.0));
+    vec3 sss = sssColor * scatterTotal * thickness * 0.8; 
+    
+    underwater += sss;
+
+    vec3 refDir = reflect(-viewDir, normal);
     vec3 skyRefl = getSkyColor(refDir);
     
-    vec3 finalColor = mix(waterBodyColor, skyRefl, fresnel);
+    vec3 halfVec = normalize(sunDir + viewDir);
+    float NdotH = max(dot(normal, halfVec), 0.0);
+    float specular = pow(NdotH, 500.0) * 2.0; 
     
-    // Specular Add
-    finalColor += SUN_COLOR * specular * 1.5;
-    
-    // Foam
-    float foamNoise = fbm(uv * 4.0 + uTime);
-    float foamMask = smoothstep(1.8, 3.0, vElevation + foamNoise * 0.5);
-    finalColor = mix(finalColor, uFoamColor, foamMask * 0.8);
+    vec3 reflectedColor = skyRefl + vec3(1.0) * specular;
 
-    gl_FragColor = vec4(finalColor, 1.0);
+    vec3 finalColor = mix(underwater, reflectedColor, fresnel);
+
+    float waterDepth = (1.0 - vDepth) * 5.0; 
+    float shallow = smoothstep(0.0, 2.0, waterDepth);
+    finalColor = mix(finalColor * 1.3, finalColor, shallow);
     
-    // Fog (Seamless edge blending)
-    // The grid radius is approx 1500 (3 tiles of 1000, centered). 
-    // We start fog at 100 and fully obscure by 1500 to hide the edge of the world.
-    float dist = length(vViewPosition);
-    float fog = smoothstep(100.0, 1500.0, dist);
-    gl_FragColor.rgb = mix(gl_FragColor.rgb, getSkyColor(viewDir), fog);
+    finalColor = mix(finalColor, uFoamColor, clamp(finalFoam, 0.0, 1.0));
+
+    float fog = smoothstep(500.0, 1500.0, dist);
+    gl_FragColor = vec4(mix(finalColor, getSkyColor(viewDir), fog), 1.0);
 }
 `;
 
@@ -314,32 +407,39 @@ varying vec3 vWorldPosition;
 
 void main() {
     vec3 viewDirection = normalize(vWorldPosition);
-    
-    // Gradient
     float h = normalize(vWorldPosition + vec3(0.0, offset, 0.0)).y;
     vec3 skyGrad = mix(bottomColor, topColor, max(pow(max(h, 0.0), exponent), 0.0));
-    
-    // Sun
     vec3 sunDir = normalize(uSunPosition);
     float sunDist = dot(viewDirection, sunDir);
     float sunHalo = pow(max(0.0, sunDist), 400.0) * 1.5;
     float sunDisc = smoothstep(0.998, 0.999, sunDist) * 10.0;
-    
     gl_FragColor = vec4(skyGrad + vec3(1.0, 0.9, 0.7) * (sunHalo + sunDisc), 1.0);
 }
 `;
 
-// Configuration for the Infinite Grid
 const TILE_SIZE = 1000;
+const RIPPLE_SIZE = 256; 
+const RIPPLE_WORLD_SIZE = 300; 
 
 const WaterScene: React.FC<WaterSceneProps> = ({ config }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const materialRef = useRef<THREE.ShaderMaterial | null>(null);
+  const bgRenderTargetRef = useRef<THREE.WebGLRenderTarget | null>(null);
   const frameIdRef = useRef<number>(0);
 
-  // Sun Position (Low angle for drama)
+  // Ripple Refs
+  const rippleMeshRef = useRef<THREE.Mesh | null>(null);
+  const rippleCameraRef = useRef<THREE.Camera | null>(null);
+  const rippleSceneRef = useRef<THREE.Scene | null>(null);
+  const currentBufferIndexRef = useRef(0);
+  const rippleBuffersRef = useRef<THREE.WebGLRenderTarget[]>([]);
+  const rippleMaterialRef = useRef<THREE.ShaderMaterial | null>(null);
+  const dropMaterialRef = useRef<THREE.ShaderMaterial | null>(null);
+
   const sunPos = new THREE.Vector3(50, 40, -100);
+  const mouse = useRef(new THREE.Vector2());
+  const raycaster = useRef(new THREE.Raycaster());
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -362,23 +462,78 @@ const WaterScene: React.FC<WaterSceneProps> = ({ config }) => {
     containerRef.current.appendChild(renderer.domElement);
     rendererRef.current = renderer;
 
+    const rtParams = {
+        minFilter: THREE.LinearFilter,
+        magFilter: THREE.LinearFilter,
+        format: THREE.RGBAFormat,
+        type: THREE.FloatType, 
+        depthBuffer: false,
+        stencilBuffer: false,
+    };
+    const rippleBuffer1 = new THREE.WebGLRenderTarget(RIPPLE_SIZE, RIPPLE_SIZE, rtParams);
+    const rippleBuffer2 = new THREE.WebGLRenderTarget(RIPPLE_SIZE, RIPPLE_SIZE, rtParams);
+    rippleBuffersRef.current = [rippleBuffer1, rippleBuffer2];
+
+    const rippleScene = new THREE.Scene();
+    rippleSceneRef.current = rippleScene;
+    
+    const rippleCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+    rippleCameraRef.current = rippleCamera;
+
+    const rippleGeo = new THREE.PlaneGeometry(2, 2);
+
+    const rippleMaterial = new THREE.ShaderMaterial({
+        vertexShader: rippleVertexShader,
+        fragmentShader: rippleFragmentShader,
+        uniforms: {
+            uTexture: { value: null },
+            uResolution: { value: new THREE.Vector2(RIPPLE_SIZE, RIPPLE_SIZE) },
+            uDamping: { value: config.rippleDamping }
+        }
+    });
+    rippleMaterialRef.current = rippleMaterial;
+
+    const dropMaterial = new THREE.ShaderMaterial({
+        vertexShader: rippleVertexShader,
+        fragmentShader: rippleDropFragmentShader,
+        uniforms: {
+            uTexture: { value: null },
+            uCenter: { value: new THREE.Vector2() },
+            uRadius: { value: config.rippleRadius }, 
+            uStrength: { value: config.rippleStrength }
+        }
+    });
+    dropMaterialRef.current = dropMaterial;
+
+    const rippleMesh = new THREE.Mesh(rippleGeo, rippleMaterial);
+    rippleScene.add(rippleMesh);
+    rippleMeshRef.current = rippleMesh;
+
+    // --- MAIN SCENE ---
+
+    const bgRenderTarget = new THREE.WebGLRenderTarget(width * window.devicePixelRatio, height * window.devicePixelRatio, {
+        minFilter: THREE.LinearFilter,
+        magFilter: THREE.LinearFilter,
+        format: THREE.RGBAFormat,
+        stencilBuffer: false,
+    });
+    bgRenderTargetRef.current = bgRenderTarget;
+
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0xffffff); 
     scene.fog = new THREE.FogExp2(0xffffff, 0.00015);
 
-    // Camera setup
     const camera = new THREE.PerspectiveCamera(55, width / height, 0.1, 5000);
     camera.position.set(0, 20, 80); 
     
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
     controls.dampingFactor = 0.05;
-    controls.maxPolarAngle = Math.PI / 2 - 0.02; // Prevent going underwater
+    controls.maxPolarAngle = Math.PI / 2 - 0.02;
     controls.minDistance = 10;
     controls.maxDistance = 500;
     controls.target.set(0, 0, -20);
 
-    // Water Material
     const waterMaterial = new THREE.ShaderMaterial({
         vertexShader: waterVertexShader,
         fragmentShader: waterFragmentShader,
@@ -392,33 +547,32 @@ const WaterScene: React.FC<WaterSceneProps> = ({ config }) => {
             uColorShallow: { value: new THREE.Color(config.colorShallow) },
             uFoamColor: { value: new THREE.Color(config.foamColor) },
             uSunPosition: { value: sunPos },
+            tBackground: { value: null },
+            uResolution: { value: new THREE.Vector2(width * window.devicePixelRatio, height * window.devicePixelRatio) },
+            
+            // New Ripple Uniforms
+            tRipple: { value: rippleBuffer1.texture },
+            uRippleCenter: { value: new THREE.Vector2(0, 0) },
+            uRippleSize: { value: RIPPLE_WORLD_SIZE },
+            uRippleIntensity: { value: config.rippleIntensity }
         },
         side: THREE.FrontSide,
         wireframe: false,
     });
     materialRef.current = waterMaterial;
 
-    // --- INFINITE OCEAN SYSTEM ---
-    
-    // Group to hold our tiles
     const oceanGroup = new THREE.Group();
     scene.add(oceanGroup);
 
-    // Geometries
-    // High Density: 256 segments (for the center tile)
     const highResGeo = new THREE.PlaneGeometry(TILE_SIZE, TILE_SIZE, 256, 256);
     highResGeo.rotateX(-Math.PI / 2);
     
-    // Low Density: 64 segments (for outer tiles)
     const lowResGeo = new THREE.PlaneGeometry(TILE_SIZE, TILE_SIZE, 64, 64);
     lowResGeo.rotateX(-Math.PI / 2);
 
-    // Meshes
-    // 1 Center Tile (High Res)
     const centerTile = new THREE.Mesh(highResGeo, waterMaterial);
     oceanGroup.add(centerTile);
 
-    // 8 Outer Tiles (Low Res)
     const outerTiles: THREE.Mesh[] = [];
     for (let i = 0; i < 8; i++) {
         const mesh = new THREE.Mesh(lowResGeo, waterMaterial);
@@ -426,7 +580,6 @@ const WaterScene: React.FC<WaterSceneProps> = ({ config }) => {
         oceanGroup.add(mesh);
     }
 
-    // Sky Dome
     const skyGeom = new THREE.SphereGeometry(4500, 32, 32);
     const skyMat = new THREE.ShaderMaterial({
         vertexShader: skyVertexShader,
@@ -443,47 +596,117 @@ const WaterScene: React.FC<WaterSceneProps> = ({ config }) => {
     const sky = new THREE.Mesh(skyGeom, skyMat);
     scene.add(sky);
 
+    // --- INTERACTION ---
+    const updateMouse = (e: MouseEvent) => {
+        const rect = renderer.domElement.getBoundingClientRect();
+        mouse.current.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+        mouse.current.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+    };
+    
+    let lastIntersect: THREE.Vector3 | null = null;
+    let isMouseDown = false;
+
+    const handlePointerMove = (e: MouseEvent) => {
+        updateMouse(e);
+        if (isMouseDown) addDrop(e);
+    };
+    const handlePointerDown = (e: MouseEvent) => {
+        isMouseDown = true;
+        addDrop(e);
+    };
+    const handlePointerUp = () => {
+        isMouseDown = false;
+        lastIntersect = null;
+    };
+
+    window.addEventListener('mousemove', handlePointerMove);
+    window.addEventListener('mousedown', handlePointerDown);
+    window.addEventListener('mouseup', handlePointerUp);
+
+    const addDrop = (e: MouseEvent) => {
+        raycaster.current.setFromCamera(mouse.current, camera);
+        const planeNormal = new THREE.Vector3(0, 1, 0);
+        const planeConstant = 0;
+        const plane = new THREE.Plane(planeNormal, planeConstant);
+        
+        const intersectPoint = new THREE.Vector3();
+        raycaster.current.ray.intersectPlane(plane, intersectPoint);
+
+        if (intersectPoint) {
+            const uvX = (intersectPoint.x + RIPPLE_WORLD_SIZE / 2) / RIPPLE_WORLD_SIZE;
+            const uvY = (intersectPoint.z + RIPPLE_WORLD_SIZE / 2) / RIPPLE_WORLD_SIZE;
+            
+            if (uvX >= 0 && uvX <= 1 && uvY >= 0 && uvY <= 1) {
+                const writeBuffer = rippleBuffersRef.current[currentBufferIndexRef.current];
+                const readBuffer = rippleBuffersRef.current[1 - currentBufferIndexRef.current];
+                
+                if (dropMaterialRef.current && rippleMeshRef.current && rippleCameraRef.current) {
+                    dropMaterialRef.current.uniforms.uTexture.value = readBuffer.texture;
+                    dropMaterialRef.current.uniforms.uCenter.value.set(uvX, uvY);
+                    
+                    rippleMeshRef.current.material = dropMaterialRef.current;
+                    renderer.setRenderTarget(writeBuffer);
+                    renderer.render(rippleSceneRef.current!, rippleCameraRef.current);
+                    renderer.setRenderTarget(null);
+                    
+                    currentBufferIndexRef.current = 1 - currentBufferIndexRef.current;
+                }
+            }
+        }
+    };
+
     const animate = (time: number) => {
         const t = time * 0.001;
-        if (materialRef.current) {
-            materialRef.current.uniforms.uTime.value = t;
-        }
         
+        const readBuffer = rippleBuffersRef.current[1 - currentBufferIndexRef.current];
+        const writeBuffer = rippleBuffersRef.current[currentBufferIndexRef.current];
+
+        if (rippleMaterialRef.current && rippleMeshRef.current && rippleCameraRef.current) {
+            rippleMeshRef.current.material = rippleMaterialRef.current;
+            rippleMaterialRef.current.uniforms.uTexture.value = readBuffer.texture;
+            
+            renderer.setRenderTarget(writeBuffer);
+            renderer.render(rippleSceneRef.current!, rippleCameraRef.current);
+            renderer.setRenderTarget(null);
+            
+            currentBufferIndexRef.current = 1 - currentBufferIndexRef.current;
+            
+            if (materialRef.current) {
+                materialRef.current.uniforms.uTime.value = t;
+                materialRef.current.uniforms.tRipple.value = writeBuffer.texture;
+            }
+        }
+
         controls.update();
 
-        // --- TILE FOLLOWING LOGIC ---
-        // Snap the grid center to the camera's position (rounded to nearest TILE_SIZE)
+        oceanGroup.visible = false;
+        if (bgRenderTargetRef.current) {
+            renderer.setRenderTarget(bgRenderTargetRef.current);
+            renderer.render(scene, camera);
+            renderer.setRenderTarget(null); 
+            if (materialRef.current) {
+                 materialRef.current.uniforms.tBackground.value = bgRenderTargetRef.current.texture;
+            }
+        }
+
+        oceanGroup.visible = true;
+
         const snapX = Math.floor(camera.position.x / TILE_SIZE + 0.5) * TILE_SIZE;
         const snapZ = Math.floor(camera.position.z / TILE_SIZE + 0.5) * TILE_SIZE;
 
-        // Place Center Tile (High Res)
         centerTile.position.set(snapX, 0, snapZ);
 
-        // Place 8 Outer Tiles (Low Res) around the center
-        // Grid Offsets:
-        // (-1, -1) (0, -1) (1, -1)
-        // (-1,  0) (High)  (1,  0)
-        // (-1,  1) (0,  1) (1,  1)
         let tileIndex = 0;
         for (let x = -1; x <= 1; x++) {
             for (let z = -1; z <= 1; z++) {
-                // Skip the center (0,0), that's our high res tile
                 if (x === 0 && z === 0) continue;
-                
                 if (outerTiles[tileIndex]) {
-                    outerTiles[tileIndex].position.set(
-                        snapX + x * TILE_SIZE, 
-                        0, 
-                        snapZ + z * TILE_SIZE
-                    );
+                    outerTiles[tileIndex].position.set(snapX + x * TILE_SIZE, 0, snapZ + z * TILE_SIZE);
                     tileIndex++;
                 }
             }
         }
         
-        // Since the shader uses World Position for noise/waves, the water pattern
-        // stays stationary in the world even as the meshes "jump" to new snap positions.
-
         renderer.render(scene, camera);
         frameIdRef.current = requestAnimationFrame(animate);
     };
@@ -494,6 +717,15 @@ const WaterScene: React.FC<WaterSceneProps> = ({ config }) => {
             const w = containerRef.current.clientWidth;
             const h = containerRef.current.clientHeight;
             rendererRef.current.setSize(w, h);
+            
+            const pixelRatio = window.devicePixelRatio;
+            if (bgRenderTargetRef.current) {
+                bgRenderTargetRef.current.setSize(w * pixelRatio, h * pixelRatio);
+            }
+            if (materialRef.current) {
+                materialRef.current.uniforms.uResolution.value.set(w * pixelRatio, h * pixelRatio);
+            }
+
             camera.aspect = w / h;
             camera.updateProjectionMatrix();
         }
@@ -503,21 +735,22 @@ const WaterScene: React.FC<WaterSceneProps> = ({ config }) => {
     return () => {
         cancelAnimationFrame(frameIdRef.current);
         window.removeEventListener('resize', handleResize);
+        window.removeEventListener('mousemove', handlePointerMove);
+        window.removeEventListener('mousedown', handlePointerDown);
+        window.removeEventListener('mouseup', handlePointerUp);
+        
         if (containerRef.current && rendererRef.current) {
             containerRef.current.removeChild(rendererRef.current.domElement);
         }
+        if (bgRenderTargetRef.current) bgRenderTargetRef.current.dispose();
         renderer.dispose();
-        waterMaterial.dispose();
-        highResGeo.dispose();
-        lowResGeo.dispose();
-        skyMat.dispose();
-        skyGeom.dispose();
+        
+        rippleBuffersRef.current.forEach(b => b.dispose());
     };
   }, []);
 
-  // Update uniforms when config changes
   useEffect(() => {
-    if (materialRef.current) {
+    if (materialRef.current && dropMaterialRef.current && rippleMaterialRef.current) {
         const u = materialRef.current.uniforms;
         u.uColorDeep.value.set(config.colorDeep);
         u.uColorShallow.value.set(config.colorShallow);
@@ -526,6 +759,12 @@ const WaterScene: React.FC<WaterSceneProps> = ({ config }) => {
         u.uWaveSpeed.value = config.waveSpeed;
         u.uWaveScale.value = config.waveScale;
         u.uRoughness.value = config.roughness;
+        u.uRippleIntensity.value = config.rippleIntensity;
+
+        dropMaterialRef.current.uniforms.uRadius.value = config.rippleRadius;
+        dropMaterialRef.current.uniforms.uStrength.value = config.rippleStrength;
+        
+        rippleMaterialRef.current.uniforms.uDamping.value = config.rippleDamping;
     }
   }, [config]);
 
@@ -539,6 +778,7 @@ const WaterScene: React.FC<WaterSceneProps> = ({ config }) => {
             width: '100%', 
             height: '100%', 
             background: '#000', 
+            cursor: 'crosshair', // Indicate interaction
         }} 
     />
   );
