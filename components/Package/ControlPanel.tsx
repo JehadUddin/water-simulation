@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import React from 'react';
-import { type MotionValue, useMotionValue } from 'framer-motion';
+import { useMotionValue } from 'framer-motion';
 import { useTheme } from '../../Theme.tsx';
 import { MetaButtonProps, WaterConfig } from '../../types/index.tsx';
 import Input from '../Core/Input.tsx';
@@ -17,7 +17,7 @@ interface ControlPanelProps {
   waterConfig: WaterConfig;
   onPropChange: (keyOrObj: string | Partial<MetaButtonProps>, value?: any) => void;
   onWaterPropChange: (updates: Partial<WaterConfig>) => void;
-  radiusMotionValue: MotionValue<number>;
+  radiusMotionValue: any; // Using any for MotionValue<number>
   onRadiusCommit: (value: number) => void;
   showMeasurements: boolean;
   onToggleMeasurements: () => void;
@@ -26,9 +26,9 @@ interface ControlPanelProps {
   // 3D View Props
   view3D: boolean;
   onToggleView3D: () => void;
-  layerSpacing: MotionValue<number>;
-  viewRotateX: MotionValue<number>;
-  viewRotateZ: MotionValue<number>;
+  layerSpacing: any; // Using any for MotionValue<number>
+  viewRotateX: any;
+  viewRotateZ: any;
 }
 
 // Helper for local motion values to use RangeSlider

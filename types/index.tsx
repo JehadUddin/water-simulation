@@ -54,6 +54,10 @@ export interface WaterConfig {
   waveScale: number; // 0-50
   normalFlatness: number; // 0-100
   
+  // Underwater
+  underwaterFogDensity: number; // 0-1
+  underwaterLightIntensity: number; // 0-5
+  
   // Ripple Physics
   rippleDamping: number; // 0.9 - 0.999
   rippleStrength: number; // 0.01 - 1.0

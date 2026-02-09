@@ -54,8 +54,10 @@ const RippleLayer: React.FC<RippleLayerProps> = ({
     return (
         <div style={styles}>
             <motion.div
-                initial={{ opacity: 0 }}
-                animate={{ opacity: opacity }}
+                {...({
+                  initial: { opacity: 0 },
+                  animate: { opacity: opacity }
+                } as any)}
                 style={{
                     width: '100%',
                     height: '100%',
@@ -73,18 +75,25 @@ const RippleLayer: React.FC<RippleLayerProps> = ({
         {ripples.map((ripple) => (
           <motion.div
             key={ripple.id}
-            initial={{
-              width: 0,
-              height: 0,
-              opacity: 0,
-            }}
-            animate={{
-              width: maxDiameter,
-              height: maxDiameter,
-              opacity: [opacity * 0.5, opacity, 0], // Flash then fade
-              filter: 'blur(8px)', // Soft blur
-            }}
-            exit={{ opacity: 0 }}
+            {...({
+              initial: {
+                width: 0,
+                height: 0,
+                opacity: 0,
+              },
+              animate: {
+                width: maxDiameter,
+                height: maxDiameter,
+                opacity: [opacity * 0.5, opacity, 0], // Flash then fade
+                filter: 'blur(8px)', // Soft blur
+              },
+              exit: { opacity: 0 },
+              transition: {
+                duration: 2.5, // Ultra-slow liquid ripple
+                ease: [0.2, 0, 0, 1], // Deep ease-out
+              },
+              onAnimationComplete: () => onRippleComplete(ripple.id)
+            } as any)}
             style={{
               position: 'absolute',
               top: ripple.y,
@@ -94,11 +103,6 @@ const RippleLayer: React.FC<RippleLayerProps> = ({
               transform: 'translate(-50%, -50%)',
               pointerEvents: 'none',
             }}
-            transition={{
-              duration: 2.5, // Ultra-slow liquid ripple
-              ease: [0.2, 0, 0, 1], // Deep ease-out
-            }}
-            onAnimationComplete={() => onRippleComplete(ripple.id)}
           />
         ))}
       </AnimatePresence>

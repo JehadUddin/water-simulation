@@ -69,13 +69,17 @@ const Select: React.FC<SelectProps> = ({ label, value, onChange, options, style 
       <motion.button
         style={triggerStyle}
         onClick={() => setIsOpen(!isOpen)}
-        whileTap={{ scale: 0.98 }}
+        {...({
+          whileTap: { scale: 0.98 }
+        } as any)}
         type="button"
       >
         <span>{currentLabel}</span>
         <motion.i 
             className="ph-bold ph-caret-down" 
-            animate={{ rotate: isOpen ? 180 : 0 }}
+            {...({
+              animate: { rotate: isOpen ? 180 : 0 }
+            } as any)}
         />
       </motion.button>
 
@@ -92,10 +96,12 @@ const Select: React.FC<SelectProps> = ({ label, value, onChange, options, style 
         {isOpen && (
           <motion.div
             style={dropdownStyle}
-            initial={{ opacity: 0, y: -10, scaleY: 0.9 }}
-            animate={{ opacity: 1, y: 0, scaleY: 1 }}
-            exit={{ opacity: 0, y: -10, scaleY: 0.9 }}
-            transition={{ duration: 0.15 }}
+            {...({
+              initial: { opacity: 0, y: -10, scaleY: 0.9 },
+              animate: { opacity: 1, y: 0, scaleY: 1 },
+              exit: { opacity: 0, y: -10, scaleY: 0.9 },
+              transition: { duration: 0.15 }
+            } as any)}
           >
             {options.map((option) => (
               <motion.div
@@ -114,9 +120,11 @@ const Select: React.FC<SelectProps> = ({ label, value, onChange, options, style 
                   justifyContent: 'space-between',
                   marginBottom: '2px'
                 }}
-                whileHover={{ 
-                    backgroundColor: option.value === value ? theme.Color.Accent.Surface[1] : theme.Color.Base.Surface[3] 
-                }}
+                {...({
+                  whileHover: { 
+                      backgroundColor: option.value === value ? theme.Color.Accent.Surface[1] : theme.Color.Base.Surface[3] 
+                  }
+                } as any)}
               >
                 {option.label}
                 {option.value === value && <i className="ph-bold ph-check" />}

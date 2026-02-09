@@ -88,8 +88,10 @@ const ColorPicker: React.FC<ColorPickerProps> = ({ label, value, onChange, style
         <motion.div 
             style={swatchStyle} 
             onClick={() => setIsOpen(!isOpen)}
-            whileHover={{ scale: 1.05 }}
-            whileTap={{ scale: 0.95 }}
+            {...({
+              whileHover: { scale: 1.05 },
+              whileTap: { scale: 0.95 }
+            } as any)}
         />
         <input 
             type="text" 
@@ -114,9 +116,11 @@ const ColorPicker: React.FC<ColorPickerProps> = ({ label, value, onChange, style
         {isOpen && (
             <motion.div
                 style={popoverStyle}
-                initial={{ opacity: 0, y: 10, scale: 0.95 }}
-                animate={{ opacity: 1, y: 0, scale: 1 }}
-                exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                {...({
+                  initial: { opacity: 0, y: 10, scale: 0.95 },
+                  animate: { opacity: 1, y: 0, scale: 1 },
+                  exit: { opacity: 0, y: 10, scale: 0.95 }
+                } as any)}
             >
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '8px' }}>
                     {presets.map((color) => (
@@ -132,8 +136,10 @@ const ColorPicker: React.FC<ColorPickerProps> = ({ label, value, onChange, style
                                 cursor: 'pointer',
                                 outline: 'none',
                             }}
-                            whileHover={{ scale: 1.2 }}
-                            whileTap={{ scale: 0.9 }}
+                            {...({
+                              whileHover: { scale: 1.2 },
+                              whileTap: { scale: 0.9 }
+                            } as any)}
                         />
                     ))}
                 </div>

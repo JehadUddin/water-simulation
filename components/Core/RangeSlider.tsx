@@ -3,12 +3,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import React, { useRef, useEffect, useState } from 'react';
-import { type MotionValue, animate } from 'framer-motion';
+import { type MotionValue, animate, useMotionValue } from 'framer-motion';
 import { useTheme } from '../../Theme.tsx';
 
 interface RangeSliderProps {
   label: string;
-  motionValue: MotionValue<number>;
+  motionValue: any; // Using any to avoid type import issues
   onCommit: (value: number) => void;
   min?: number;
   max?: number;
@@ -22,7 +22,7 @@ const RangeSlider: React.FC<RangeSliderProps> = ({ label, motionValue, onCommit,
 
   // Sync internal state with external motion value updates (e.g. undo/redo)
   useEffect(() => {
-    const unsubscribe = motionValue.onChange((v) => {
+    const unsubscribe = motionValue.onChange((v: number) => {
       if (!isDragging) {
         setInternalValue(v);
       }

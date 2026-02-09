@@ -4,7 +4,7 @@
  */
 import React, { useState } from 'react';
 import { useTheme } from '../../Theme.tsx';
-import { motion, type MotionValue, useTransform, useMotionValue } from 'framer-motion';
+import { motion, useTransform, useMotionValue } from 'framer-motion';
 import StateLayer from './StateLayer.tsx';
 import RippleLayer, { Ripple } from './RippleLayer.tsx';
 
@@ -19,9 +19,9 @@ interface ButtonProps {
   onClick?: () => void;
   customFill?: string;
   customColor?: string;
-  customRadius?: string | MotionValue<string>;
+  customRadius?: string | any; // using any to avoid type import issues
   disabled?: boolean;
-  layerSpacing?: MotionValue<number>;
+  layerSpacing?: any; // using any for MotionValue<number>
   view3D?: boolean;
   // Forced States
   forcedHover?: boolean;
@@ -59,9 +59,9 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(({
   const defaultLayerSpacing = useMotionValue(0);
   const effectiveLayerSpacing = layerSpacing || defaultLayerSpacing;
 
-  const zStateLayer = useTransform(effectiveLayerSpacing, v => `translateZ(${v}px)`);
-  const zRippleLayer = useTransform(effectiveLayerSpacing, v => `translateZ(${v * 2}px)`);
-  const zContent = useTransform(effectiveLayerSpacing, v => `translateZ(${v * 3}px)`);
+  const zStateLayer = useTransform(effectiveLayerSpacing, (v: number) => `translateZ(${v}px)`);
+  const zRippleLayer = useTransform(effectiveLayerSpacing, (v: number) => `translateZ(${v * 2}px)`);
+  const zContent = useTransform(effectiveLayerSpacing, (v: number) => `translateZ(${v * 3}px)`);
   
   // Helper to calculate relative coordinates
   const getCoords = (e: React.PointerEvent | React.MouseEvent) => {
@@ -277,10 +277,11 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(({
       onPointerMove={handlePointerMove}
       onPointerLeave={handlePointerLeave}
       onPointerDown={handlePointerDown}
-      animate={getAnimateState()}
-      // Default tap behavior if not forced
-      whileTap={forcedActive ? undefined : { scale: 0.95, y: 2, boxShadow: 'none' }}
-      transition={{ duration: 0.2, ease: 'easeOut' }}
+      {...({
+        animate: getAnimateState(),
+        whileTap: forcedActive ? undefined : { scale: 0.95, y: 2, boxShadow: 'none' },
+        transition: { duration: 0.2, ease: 'easeOut' }
+      } as any)}
     >
       {/* 
         Decoupled Layers with 3D Support
@@ -295,11 +296,13 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(({
             ...layerWrapperStyle, 
             zIndex: 1,
         }}
-        animate={{ 
-            opacity: forcedFocus ? 1 : 0,
-            scale: forcedFocus ? 1 : 0.9,
-        }}
-        transition={{ duration: 0.2 }}
+        {...({
+          animate: { 
+              opacity: forcedFocus ? 1 : 0,
+              scale: forcedFocus ? 1 : 0.9,
+          },
+          transition: { duration: 0.2 }
+        } as any)}
       >
          <div style={{
              position: 'absolute',

@@ -96,16 +96,18 @@ const FloatingWindow: React.FC<FloatingWindowProps> = ({
 
   return (
     <motion.div
-      style={{ ...styles, x, y }}
-      initial={{ opacity: 0, scale: 0.95 }}
-      animate={{ opacity: 1, scale: 1 }}
-      exit={{ opacity: 0, scale: 0.95 }}
-      drag
-      dragListener={false}
-      dragControls={dragControls}
-      dragMomentum={false}
-      onPointerDown={() => onFocus()}
-      transition={{ type: 'spring', damping: 28, stiffness: 320 }}
+      style={{ ...styles, x, y } as any}
+      {...({
+        initial: { opacity: 0, scale: 0.95 },
+        animate: { opacity: 1, scale: 1 },
+        exit: { opacity: 0, scale: 0.95 },
+        drag: true,
+        dragListener: false,
+        dragControls: dragControls,
+        dragMomentum: false,
+        onPointerDown: () => onFocus(),
+        transition: { type: 'spring', damping: 28, stiffness: 320 }
+      } as any)}
     >
       <div
         style={headerStyle}
@@ -128,8 +130,10 @@ const FloatingWindow: React.FC<FloatingWindowProps> = ({
               cursor: 'pointer',
               boxShadow: theme.effects['Effect.Shadow.Inset.1'],
             }}
-            whileHover={{ scale: 1.2 }}
-            whileTap={{ scale: 0.9 }}
+            {...({
+              whileHover: { scale: 1.2 },
+              whileTap: { scale: 0.9 }
+            } as any)}
             aria-label="Close"
             onPointerDown={(e) => e.stopPropagation()}
           />

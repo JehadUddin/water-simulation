@@ -1,4 +1,3 @@
-
 /**
  * @license
  * SPDX-License-Identifier: Apache-2.0
@@ -27,9 +26,11 @@ const Stage: React.FC<StageProps> = ({
         backgroundColor: '#000', 
     }}>
         <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ duration: 1 }}
+            {...({
+              initial: { opacity: 0 },
+              animate: { opacity: 1 },
+              transition: { duration: 1 }
+            } as any)}
             style={{ position: 'absolute', width: '100%', height: '100%' }}
         >
             <WaterScene config={waterConfig} />

@@ -13,7 +13,7 @@ interface WaterSceneProps {
   initialCameraState?: { position: [number, number, number], target: [number, number, number] } | null;
 }
 
-// --- SHADER UTILS (Shared Noise Function) ---
+// --- SHADER UTILS ---
 const commonNoise = `
 vec3 mod289(vec3 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
 vec2 mod289(vec2 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
@@ -40,6 +40,26 @@ float snoise(vec2 v) {
   g.x  = a0.x  * x0.x  + h.x  * x0.y;
   g.yz = a0.yz * x12.xz + h.yz * x12.yw;
   return 130.0 * dot(m, g);
+}
+`;
+
+const voronoiUtils = `
+vec2 hash2( vec2 p ) { return fract(sin(vec2(dot(p,vec2(127.1,311.7)),dot(p,vec2(269.5,183.3))))*43758.5453); }
+
+float voronoi( in vec2 x ) {
+    vec2 n = floor(x);
+    vec2 f = fract(x);
+    float m = 8.0;
+    for( int j=-1; j<=1; j++ )
+    for( int i=-1; i<=1; i++ ) {
+        vec2 g = vec2( float(i), float(j) );
+        vec2 o = hash2( n + g );
+        o = 0.5 + 0.5*sin( uTime * 1.5 + 6.2831*o );
+        vec2 r = g + o - f;
+        float d = dot(r,r);
+        if( d<m ) m=d;
+    }
+    return m;
 }
 `;
 
@@ -87,7 +107,7 @@ void main() {
 
 // --- AAA GRAPHICS SHADERS ---
 
-// 1. VOLUMETRIC GOD RAYS
+// 1. GOD RAYS
 const godRayVertexShader = `
 varying vec2 vUv;
 varying float vAlpha;
@@ -96,108 +116,149 @@ ${commonNoise}
 void main() {
     vUv = uv;
     vec3 pos = position;
-    // Organic sway based on depth
     float sway = snoise(vec2(pos.y * 0.05, uTime * 0.15)) * 6.0;
     pos.x += sway * (1.0 - uv.y); 
     pos.z += sway * 0.5 * (1.0 - uv.y);
     gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
-    // Fade out top (surface) and bottom (deep)
     vAlpha = smoothstep(0.0, 0.1, uv.y) * smoothstep(1.0, 0.6, uv.y);
 }
 `;
 const godRayFragmentShader = `
 uniform float uTime;
 uniform vec3 uColor;
+uniform float uLightIntensity;
 varying vec2 vUv;
 varying float vAlpha;
 ${commonNoise}
 void main() {
-    // Scrolling noise patterns to simulate light passing through waves
     float n1 = snoise(vec2(vUv.x * 3.0 + uTime * 0.1, vUv.y * 0.5 - uTime * 0.2));
     float n2 = snoise(vec2(vUv.x * 6.0 - uTime * 0.05, vUv.y * 2.0 - uTime * 0.4));
-    
-    // Combine for complex interference pattern
     float beam = smoothstep(0.4, 0.8, n1 * 0.5 + n2 * 0.5 + 0.45);
-    
-    // Soft horizontal edges for the beam
     float xFade = 1.0 - abs(vUv.x - 0.5) * 2.0;
     xFade = smoothstep(0.0, 0.4, xFade);
-
-    float alpha = vAlpha * beam * xFade * 0.15; 
+    float alpha = vAlpha * beam * xFade * 0.3 * uLightIntensity; 
     gl_FragColor = vec4(uColor, alpha);
 }
 `;
 
-// 2. SHARP "GOBO" CAUSTICS
-const causticsVertexShader = `
+// 2. PROCEDURAL TERRAIN (REALISTIC SAND)
+const terrainVertexShader = `
+uniform float uTime;
 varying vec2 vUv;
 varying vec3 vWorldPos;
+varying float vElevation;
+${commonNoise}
+
 void main() {
     vUv = uv;
-    vec4 worldPosition = modelMatrix * vec4(position, 1.0);
+    vec3 pos = position;
+    
+    // Procedural Terrain
+    // Plane rotated -90 on X, so pos.xy is world XZ
+    float large = snoise(pos.xy * 0.002) * 45.0; // Larger dunes
+    float medium = snoise(pos.xy * 0.01 + uTime * 0.01) * 6.0; 
+    float small = snoise(pos.xy * 0.08) * 1.5;
+    
+    float elevation = large + medium + small;
+    pos.z += elevation;
+    vElevation = elevation;
+
+    vec4 worldPosition = modelMatrix * vec4(pos, 1.0);
     vWorldPos = worldPosition.xyz;
     gl_Position = projectionMatrix * viewMatrix * worldPosition;
 }
 `;
-const causticsFragmentShader = `
+
+const terrainFragmentShader = `
 uniform float uTime;
-uniform vec3 uColor;       
-uniform vec3 uLightColor;  
+uniform vec3 uColorDeep;
+uniform vec3 uColorShallow;
+uniform float uLightIntensity;
 varying vec2 vUv;
 varying vec3 vWorldPos;
-
-vec2 hash2( vec2 p ) { return fract(sin(vec2(dot(p,vec2(127.1,311.7)),dot(p,vec2(269.5,183.3))))*43758.5453); }
-
-float voronoi( in vec2 x ) {
-    vec2 n = floor(x);
-    vec2 f = fract(x);
-    float m = 8.0;
-    for( int j=-1; j<=1; j++ )
-    for( int i=-1; i<=1; i++ ) {
-        vec2 g = vec2( float(i), float(j) );
-        vec2 o = hash2( n + g );
-        o = 0.5 + 0.5*sin( uTime * 1.5 + 6.2831*o ); 
-        vec2 r = g + o - f;
-        float d = dot(r,r);
-        if( d<m ) m=d;
-    }
-    return m;
-}
+varying float vElevation;
+${voronoiUtils}
+${commonNoise}
 
 void main() {
-    vec2 uv = vWorldPos.xz * 0.06; 
+    // REALISTIC SAND PALETTE
+    vec3 sandColor = vec3(0.85, 0.78, 0.65); // Natural Beige
+    vec3 rockColor = vec3(0.4, 0.35, 0.3);   // Darker shadows
     
-    // Dual-layer Voronoi for complex movement
-    float v1 = voronoi(uv * 1.0 + uTime * 0.1);
-    float v2 = voronoi(uv * 1.5 - vec2(uTime * 0.05, 0.0));
+    // Mix sand based on height (valleys are darker)
+    float heightFactor = smoothstep(-20.0, 30.0, vElevation);
+    vec3 albedo = mix(rockColor, sandColor, heightFactor);
     
-    // Min distance
-    float c = min(v1, v2);
-    
-    // AAA TRICK: Invert and sharpen powerfully.
-    // Real caustics are focused light, so they are thin bright lines.
-    float light = 1.0 - sqrt(c);
-    light = pow(light, 16.0); // Extreme sharpening
-    
-    // AAA TRICK: Chromatic Aberration
-    // Sample the noise at slightly different offsets for R and B channels
-    float aberration = 0.004;
-    float r = pow(1.0 - sqrt(min(voronoi(uv * 1.0 + uTime * 0.1 + aberration), v2)), 16.0);
-    float b = pow(1.0 - sqrt(min(voronoi(uv * 1.0 + uTime * 0.1 - aberration), v2)), 16.0);
-    
-    vec3 causticColor = vec3(r, light, b);
+    // Texture grain
+    float noise = snoise(vWorldPos.xz * 0.8);
+    albedo *= (0.9 + 0.1 * noise);
 
-    // Falloff vignette
-    float dist = length(vWorldPos.xz);
-    float vign = smoothstep(120.0, 40.0, dist);
+    // CAUSTICS - UPGRADED
+    vec2 uv = vWorldPos.xz * 0.04;
     
-    vec3 finalColor = uColor * 0.2 + uLightColor * causticColor * 3.0 * vign;
+    // Domain warping for liquidity (makes lines curvy)
+    vec2 warp = vec2(
+        snoise(uv * 0.5 + uTime * 0.1),
+        snoise(uv * 0.5 - uTime * 0.1)
+    ) * 0.2;
     
+    vec2 warpedUV = uv + warp;
+    
+    // Scrolling layers
+    vec2 scroll1 = vec2(uTime * 0.05, uTime * 0.02);
+    vec2 scroll2 = vec2(-uTime * 0.03, uTime * 0.04);
+    
+    // Chromatic Aberration offsets
+    float aber = 0.005;
+    
+    // R Channel
+    float v1r = voronoi(warpedUV * 1.5 + scroll1 + vec2(aber, 0.0)); 
+    float v2r = voronoi(warpedUV * 2.0 + scroll2 - vec2(aber, 0.0) + 0.5);
+    float cR = min(v1r, v2r);
+    
+    // G Channel
+    float v1g = voronoi(warpedUV * 1.5 + scroll1);
+    float v2g = voronoi(warpedUV * 2.0 + scroll2 + 0.5);
+    float cG = min(v1g, v2g);
+    
+    // B Channel
+    float v1b = voronoi(warpedUV * 1.5 + scroll1 - vec2(aber, 0.0));
+    float v2b = voronoi(warpedUV * 2.0 + scroll2 + vec2(aber, 0.0) + 0.5);
+    float cB = min(v1b, v2b);
+    
+    // Sharpen and Intensity
+    vec3 caustics = vec3(
+        pow(1.0 - sqrt(cR), 45.0),
+        pow(1.0 - sqrt(cG), 45.0),
+        pow(1.0 - sqrt(cB), 45.0)
+    );
+    
+    // Add extra "hot spots" boost
+    caustics += pow(caustics, vec3(1.5)) * 1.5;
+
+    // Add caustics to sand
+    vec3 finalColor = albedo + (caustics * uLightIntensity * 3.0);
+
+    // DISTANCE FOG (Physically Based)
+    // Water absorbs red light first, then green, leaving blue.
+    float dist = length(vWorldPos.xz); 
+    
+    // Exponential fog
+    float fogDensity = 0.0025;
+    float fogFactor = 1.0 - exp(-dist * fogDensity);
+    
+    // Fog color isn't just "deep color", it's light scattering
+    // Near surface: Lighter. Deep: Darker.
+    vec3 fogColor = mix(uColorDeep, uColorShallow * 0.5, 0.3);
+    
+    // Blend geometry into fog
+    finalColor = mix(finalColor, fogColor, fogFactor);
+
     gl_FragColor = vec4(finalColor, 1.0);
 }
 `;
 
-// 3. UNIFIED ENVIRONMENT GRADIENT (Sky + Abyss)
+// 3. UNIFIED ENVIRONMENT (ABYSS GRADIENT)
 const gradientVertexShader = `
 varying vec3 vWorldPos;
 void main() {
@@ -209,40 +270,47 @@ void main() {
 const gradientFragmentShader = `
 uniform vec3 uColorDeep;
 uniform vec3 uColorShallow;
-uniform float uTransition; // 0.0 (Above) to 1.0 (Below)
+uniform float uTransition; 
 uniform vec3 uSunPosition;
+uniform float uLightIntensity;
 varying vec3 vWorldPos;
 
 void main() {
     vec3 dir = normalize(vWorldPos);
     
-    // -- ABYSS LAYER --
-    float t = smoothstep(-200.0, 10.0, vWorldPos.y);
-    vec3 abyss = mix(vec3(0.0), uColorDeep, t * 0.9 + 0.1); 
-    // Underwater Sun Glow
-    float sun = max(0.0, dot(dir, vec3(0,1,0)));
-    abyss = mix(abyss, uColorShallow, pow(sun, 6.0) * 0.3); 
+    // Vertical Gradient
+    // Up: Surface Light. Down: Total Darkness.
+    float y = dir.y;
     
-    // -- SKY LAYER --
-    // Simple gradients
-    vec3 skyHorizon = vec3(0.8, 0.9, 0.95); // White-ish blue at horizon
-    vec3 skyZenith = vec3(0.2, 0.5, 0.9);   // Deep blue at top
-    vec3 sky = mix(skyHorizon, skyZenith, smoothstep(0.0, 0.5, dir.y));
+    // 1. Abyss (Bottom)
+    // Fade to black/void at the very bottom (-1.0)
+    vec3 deepVoid = vec3(0.005, 0.01, 0.02); // Almost black
     
-    // Sun Disc
-    float sunDot = max(0.0, dot(dir, normalize(uSunPosition)));
-    sky += vec3(1.0, 0.9, 0.8) * pow(sunDot, 64.0);
-    // Sun Glow
-    sky += vec3(1.0, 0.9, 0.7) * pow(sunDot, 4.0) * 0.2;
+    // Mix Deep Config Color with Void based on depth
+    vec3 bottomColor = mix(deepVoid, uColorDeep, smoothstep(-1.0, -0.2, y));
+    
+    // 2. Mid-Water (Scattering)
+    // As we go up, introduce scatter from light
+    vec3 midColor = mix(bottomColor, uColorShallow * 0.4, smoothstep(-0.2, 0.4, y));
+    
+    // 3. Sky/Surface (Top)
+    vec3 skyHorizon = vec3(0.8, 0.9, 0.95); 
+    vec3 topColor = mix(midColor, skyHorizon, smoothstep(0.4, 1.0, y));
 
-    // Mix based on camera state (smoothed in JS)
-    vec3 finalCol = mix(sky, abyss, uTransition);
+    vec3 finalCol = topColor;
+
+    // Sun Highlight
+    float sun = max(0.0, dot(dir, vec3(0,1,0)));
+    finalCol += uColorShallow * pow(sun, 8.0) * 0.4 * uLightIntensity;
+    
+    // Camera transition Logic (handled in JS usually, but kept for blending)
+    // Here we primarily render the environment map.
     
     gl_FragColor = vec4(finalCol, 1.0);
 }
 `;
 
-// 4. MAIN WATER SHADER (With Snell's Window Fix)
+// 4. MAIN WATER SHADER 
 const waterVertexShader = `
 precision highp float;
 uniform float uTime;
@@ -331,6 +399,9 @@ uniform float uWaveHeight;
 uniform sampler2D tBackground; 
 uniform vec2 uResolution;      
 uniform float uRoughness;
+uniform float uTransparency;
+uniform float uNormalFlatness; 
+uniform float uLightIntensity; 
 varying vec3 vWorldPos;
 varying vec3 vViewPosition;
 varying vec3 vNormal;
@@ -341,7 +412,6 @@ ${commonNoise}
 vec3 getSkyColor(vec3 rd) {
     vec3 sunDir = normalize(uSunPosition);
     float sunDot = max(dot(rd, sunDir), 0.0);
-    // Simple gradient for reflections
     vec3 col = mix(vec3(0.6, 0.7, 0.8), vec3(0.1, 0.3, 0.6), rd.y * 0.5 + 0.5);
     col += 0.8 * vec3(1.0, 0.95, 0.9) * pow(sunDot, 120.0);
     return col;
@@ -362,38 +432,37 @@ void main() {
     vec3 sunDir = normalize(uSunPosition);
     float dist = length(vViewPosition); 
     
-    // --- AAA UNDERWATER LOGIC (Snell's Window) ---
-    // If we are looking at the backface (underwater looking up):
+    // --- UNDERWATER VIEW ---
     if (!gl_FrontFacing) {
-        
-        vec2 distort = vNormal.xz * 0.3; 
+        vec2 distort = vNormal.xz * 0.2; 
         vec3 distortedView = normalize(viewDir + vec3(distort.x, 0.0, distort.y));
-        
-        // Critical Angle (Approximate)
         float NdotV = max(0.0, dot(vec3(0,1,0), distortedView));
+        float fresnel = pow(1.0 - NdotV, 3.5); 
         
-        // Fresnel curve
-        float fresnel = pow(1.0 - NdotV, 3.0); 
-        
-        // 1. SKY (Refraction)
         vec3 skyColor = getSkyColor(distortedView);
         
-        // 2. REFLECTION OF DEEP
-        // FIX: Don't use dark black multiplier. Blend shallow and deep for a translucent look.
-        vec3 deepReflect = mix(uColorDeep, uColorShallow, 0.3); 
+        // Reflection of Deep (The Void)
+        // Make this DARK to contrast with window
+        vec3 deepReflect = uColorDeep * 0.2; 
         
         vec3 finalUnder = mix(skyColor, deepReflect, fresnel);
         
-        // Sun Spot
+        // Rim glow
+        float rim = smoothstep(0.0, 0.15, fresnel) * smoothstep(0.3, 0.0, fresnel);
+        finalUnder += uColorShallow * rim * uLightIntensity;
+        
+        // Sun
         float sunDot = max(0.0, dot(distortedView, sunDir));
-        finalUnder += vec3(1.0, 0.95, 0.8) * pow(sunDot, 30.0) * (1.0 - fresnel);
+        finalUnder += vec3(1.0, 0.95, 0.8) * pow(sunDot, 40.0) * (1.0 - fresnel);
 
-        gl_FragColor = vec4(finalUnder, 1.0);
+        gl_FragColor = vec4(finalUnder, uTransparency);
         return;
     }
 
     // --- SURFACE VIEW ---
     vec3 normal = normalize(vNormal);
+    normal.xz *= (1.0 - uNormalFlatness); 
+    normal = normalize(normal);
     normal = applyMicroNormals(normal, vWorldPos, uTime);
 
     // Foam
@@ -406,29 +475,95 @@ void main() {
     float finalFoam = mix(bubbles * crestFoam, 1.0, smoothstep(0.9, 1.0, crestFoam));
     finalFoam *= (1.0 - smoothstep(100.0, 500.0, dist));
 
-    // Fresnel & Reflection
+    // Fresnel
     float NdotV = max(dot(viewDir, normal), 0.0);
     float fresnel = 0.02 + 0.98 * pow(1.0 - NdotV, 5.0);
     
-    vec3 refracted = mix(uColorDeep, uColorShallow, 0.6); 
+    // Refraction (Body Color)
+    // Make surface look like it has depth
+    vec3 refracted = mix(uColorDeep, uColorShallow, 0.5); 
     float sss = smoothstep(-1.0, 1.0, vElevation) * (1.0 - NdotV);
     refracted += uColorShallow * sss * 0.5;
 
+    // Reflection
     vec3 refDir = reflect(-viewDir, normal);
     vec3 reflected = getSkyColor(refDir);
     
+    // Specular
     vec3 halfVec = normalize(sunDir + viewDir);
     float NdotH = max(dot(normal, halfVec), 0.0);
     float specular = pow(NdotH, 800.0); 
     
     vec3 finalColor = mix(refracted, reflected, fresnel);
     finalColor += vec3(1.0) * specular;
-    
     finalColor = mix(finalColor, uFoamColor, finalFoam);
 
-    // We let global fog handle distance fading, but can mix slightly here to avoid hard edges
+    // Fog (Surface)
     float fog = smoothstep(200.0, 1000.0, dist);
-    gl_FragColor = vec4(mix(finalColor, getSkyColor(viewDir), fog), 1.0);
+    
+    float foamOpacity = smoothstep(0.0, 0.5, finalFoam);
+    float surfaceAlpha = mix(uTransparency, 1.0, foamOpacity);
+    
+    gl_FragColor = vec4(mix(finalColor, getSkyColor(viewDir), fog), surfaceAlpha);
+}
+`;
+
+// 5. BUBBLES SHADERS (FIXED: Constrained below surface)
+const bubbleVertexShader = `
+uniform float uTime;
+attribute float aScale;
+attribute float aSpeed;
+attribute float aRandom;
+varying float vAlpha;
+
+void main() {
+    vec3 pos = position;
+    
+    // Rising mechanic
+    // Define exact range: Rise from deep (-80) to just below surface (-2)
+    float bottom = -80.0;
+    float top = -2.0; 
+    float range = top - bottom;
+    
+    // Use modulo to loop Y position within range
+    // aRandom * 100.0 offsets the start cycle so they don't all loop together
+    float loopY = mod(pos.y + uTime * aSpeed * 4.0, range);
+    pos.y = bottom + loopY;
+    
+    // Lateral drift (wobble)
+    float wobble = sin(uTime * 3.0 + aRandom * 10.0) * 0.5;
+    pos.x += wobble;
+    pos.z += cos(uTime * 2.0 + aRandom * 10.0) * 0.5;
+
+    vec4 mvPosition = modelViewMatrix * vec4(pos, 1.0);
+    gl_PointSize = aScale * (300.0 / -mvPosition.z);
+    gl_Position = projectionMatrix * mvPosition;
+
+    // Fade logic: Fade in at bottom, fade out at top
+    float fadeOut = 1.0 - smoothstep(top - 10.0, top, pos.y);
+    float fadeIn = smoothstep(bottom, bottom + 10.0, pos.y);
+    vAlpha = fadeIn * fadeOut;
+}
+`;
+
+const bubbleFragmentShader = `
+uniform vec3 uColor;
+varying float vAlpha;
+
+void main() {
+    vec2 uv = gl_PointCoord.xy - vec2(0.5);
+    float len = length(uv);
+    if(len > 0.5) discard;
+
+    // Bubble Aesthetics
+    float rim = smoothstep(0.35, 0.45, len);
+    float glow = 1.0 - smoothstep(0.0, 0.4, len);
+    float spot = 1.0 - smoothstep(0.0, 0.12, length(uv - vec2(0.15, 0.15)));
+    
+    // Composition
+    float alpha = (rim + spot + glow * 0.2) * 0.8;
+    
+    gl_FragColor = vec4(uColor, alpha * vAlpha);
 }
 `;
 
@@ -502,7 +637,8 @@ const WaterScene: React.FC<WaterSceneProps> = ({ config, initialCameraState }) =
             uColorDeep: { value: new THREE.Color(config.colorDeep) }, 
             uColorShallow: { value: new THREE.Color(config.colorShallow) },
             uSunPosition: { value: sunPos },
-            uTransition: { value: 0.0 }
+            uTransition: { value: 0.0 },
+            uLightIntensity: { value: config.underwaterLightIntensity }
         },
         side: THREE.BackSide
     });
@@ -516,19 +652,23 @@ const WaterScene: React.FC<WaterSceneProps> = ({ config, initialCameraState }) =
     underwaterGroupRef.current = underwaterGroup;
     scene.add(underwaterGroup);
 
-    // Seabed (Caustics)
-    const bedGeo = new THREE.PlaneGeometry(300, 300, 128, 128);
-    bedGeo.rotateX(-Math.PI / 2);
+    // --- SEABED (PROCEDURAL TERRAIN) ---
+    const bedGeo = new THREE.PlaneGeometry(1000, 1000, 256, 256);
+    bedGeo.rotateX(-Math.PI / 2); 
+    
     const bedMat = new THREE.ShaderMaterial({
-        vertexShader: causticsVertexShader,
-        fragmentShader: causticsFragmentShader,
-        uniforms: { uTime: { value: 0 }, uColor: { value: new THREE.Color(config.colorDeep) }, uLightColor: { value: new THREE.Color(config.colorShallow) } },
-        transparent: true,
-        blending: THREE.AdditiveBlending, 
+        vertexShader: terrainVertexShader,
+        fragmentShader: terrainFragmentShader,
+        uniforms: {
+            uTime: { value: 0 },
+            uColorDeep: { value: new THREE.Color(config.colorDeep) },
+            uColorShallow: { value: new THREE.Color(config.colorShallow) },
+            uLightIntensity: { value: config.underwaterLightIntensity }
+        },
     });
     materialsRef.current.push(bedMat);
     const seabed = new THREE.Mesh(bedGeo, bedMat);
-    seabed.position.y = -50;
+    seabed.position.y = -60; 
     underwaterGroup.add(seabed);
 
     // God Rays
@@ -537,7 +677,11 @@ const WaterScene: React.FC<WaterSceneProps> = ({ config, initialCameraState }) =
     const rayMat = new THREE.ShaderMaterial({
         vertexShader: godRayVertexShader,
         fragmentShader: godRayFragmentShader,
-        uniforms: { uTime: { value: 0 }, uColor: { value: new THREE.Color(config.colorShallow) } },
+        uniforms: { 
+            uTime: { value: 0 }, 
+            uColor: { value: new THREE.Color(config.colorShallow) },
+            uLightIntensity: { value: config.underwaterLightIntensity }
+        },
         transparent: true, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false
     });
     materialsRef.current.push(rayMat);
@@ -551,6 +695,49 @@ const WaterScene: React.FC<WaterSceneProps> = ({ config, initialCameraState }) =
         ray.scale.setScalar(0.8 + Math.random() * 0.5);
         underwaterGroup.add(ray);
     }
+    
+    // --- BUBBLES (LITTLE BUBBLES) ---
+    const bCount = 400;
+    const bGeo = new THREE.BufferGeometry();
+    const bPos = new Float32Array(bCount * 3);
+    const bScale = new Float32Array(bCount);
+    const bSpeed = new Float32Array(bCount);
+    const bRandom = new Float32Array(bCount);
+    
+    for(let i=0; i<bCount; i++) {
+        // Spread bubbles around the center, mostly underwater
+        const r = 40 * Math.sqrt(Math.random());
+        const theta = Math.random() * 2 * Math.PI;
+        bPos[i*3] = r * Math.cos(theta); // X
+        // Y Position: Pre-seed randomly between bottom and top of range
+        bPos[i*3+1] = Math.random() * 80 - 80; // range -80 to 0
+        bPos[i*3+2] = r * Math.sin(theta); // Z
+        
+        bScale[i] = Math.random() * 1.5 + 0.5; // Small to medium size
+        bSpeed[i] = Math.random() * 1.0 + 0.5; // Moderate speed
+        bRandom[i] = Math.random();
+    }
+    
+    bGeo.setAttribute('position', new THREE.BufferAttribute(bPos, 3));
+    bGeo.setAttribute('aScale', new THREE.BufferAttribute(bScale, 1));
+    bGeo.setAttribute('aSpeed', new THREE.BufferAttribute(bSpeed, 1));
+    bGeo.setAttribute('aRandom', new THREE.BufferAttribute(bRandom, 1));
+    
+    const bMat = new THREE.ShaderMaterial({
+        vertexShader: bubbleVertexShader,
+        fragmentShader: bubbleFragmentShader,
+        uniforms: {
+            uTime: { value: 0 },
+            uColor: { value: new THREE.Color(config.colorShallow) }
+        },
+        transparent: true,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+    });
+    materialsRef.current.push(bMat);
+    const bubbles = new THREE.Points(bGeo, bMat);
+    underwaterGroup.add(bubbles);
+
 
     // --- RIPPLES SETUP ---
     const rtParams = { minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter, format: THREE.RGBAFormat, type: THREE.FloatType };
@@ -574,6 +761,9 @@ const WaterScene: React.FC<WaterSceneProps> = ({ config, initialCameraState }) =
         uniforms: {
             uTime: { value: 0 }, uWaveHeight: { value: config.waveHeight }, uWaveSpeed: { value: config.waveSpeed }, uWaveScale: { value: config.waveScale }, uRoughness: { value: config.roughness },
             uColorDeep: { value: new THREE.Color(config.colorDeep) }, uColorShallow: { value: new THREE.Color(config.colorShallow) }, uFoamColor: { value: new THREE.Color(config.foamColor) },
+            uTransparency: { value: config.transparency },
+            uNormalFlatness: { value: config.normalFlatness / 100 }, 
+            uLightIntensity: { value: config.underwaterLightIntensity },
             uSunPosition: { value: sunPos }, tBackground: { value: null }, uResolution: { value: new THREE.Vector2(width, height) },
             tRipple: { value: rippleBuffersRef.current[0].texture }, uRippleCenter: { value: new THREE.Vector2(0, 0) }, uRippleSize: { value: RIPPLE_WORLD_SIZE }, uRippleIntensity: { value: config.rippleIntensity }
         },
@@ -648,11 +838,17 @@ const WaterScene: React.FC<WaterSceneProps> = ({ config, initialCameraState }) =
         // Calculate factor based on depth (-1m to +1m transition zone)
         const transition = THREE.MathUtils.clamp((0.5 - camera.position.y) / 1.0, 0, 1);
         
-        // Update Fog
+        // Update Fog (Use config Fog Density)
         const white = new THREE.Color(0xffffff);
         const deep = new THREE.Color(config.colorDeep);
-        const fogColor = white.clone().lerp(deep, transition);
-        const fogDensity = THREE.MathUtils.lerp(0.0002, 0.02, transition);
+        const shallow = new THREE.Color(config.colorShallow);
+        
+        // Brighter fog color mixing
+        const underwaterFogColor = deep.clone().lerp(shallow, 0.5 * config.underwaterLightIntensity * 0.3); 
+        const fogColor = white.clone().lerp(underwaterFogColor, transition);
+        
+        // Use user fog density
+        const fogDensity = THREE.MathUtils.lerp(0.0002, config.underwaterFogDensity * 0.05, transition);
         
         if(scene.fog instanceof THREE.FogExp2) {
              scene.fog.color.copy(fogColor);
@@ -714,11 +910,22 @@ const WaterScene: React.FC<WaterSceneProps> = ({ config, initialCameraState }) =
     materialsRef.current.forEach(mat => {
         if(mat.uniforms.uColorDeep) mat.uniforms.uColorDeep.value.copy(deep);
         if(mat.uniforms.uColorShallow) mat.uniforms.uColorShallow.value.copy(shallow);
-        if(mat.uniforms.uColor) mat.uniforms.uColor.value.copy(mat.vertexShader === godRayVertexShader ? shallow : deep);
+        if(mat.uniforms.uColor) mat.uniforms.uColor.value.copy(
+            mat.vertexShader === godRayVertexShader ? shallow : 
+            mat.vertexShader === bubbleVertexShader ? shallow : deep
+        );
         if(mat.uniforms.uLightColor) mat.uniforms.uLightColor.value.copy(shallow);
         if(mat.uniforms.uWaveHeight) mat.uniforms.uWaveHeight.value = config.waveHeight;
         if(mat.uniforms.uWaveSpeed) mat.uniforms.uWaveSpeed.value = config.waveSpeed;
+        if(mat.uniforms.uWaveScale) mat.uniforms.uWaveScale.value = config.waveScale;
+        if(mat.uniforms.uRoughness) mat.uniforms.uRoughness.value = config.roughness;
         if(mat.uniforms.uRippleIntensity) mat.uniforms.uRippleIntensity.value = config.rippleIntensity;
+        // Update Transparency
+        if(mat.uniforms.uTransparency) mat.uniforms.uTransparency.value = config.transparency;
+        // Update Normal Flatness
+        if(mat.uniforms.uNormalFlatness) mat.uniforms.uNormalFlatness.value = config.normalFlatness / 100;
+        // Update Light Intensity
+        if(mat.uniforms.uLightIntensity) mat.uniforms.uLightIntensity.value = config.underwaterLightIntensity;
     });
     if(dropMaterialRef.current) {
         dropMaterialRef.current.uniforms.uRadius.value = config.rippleRadius;

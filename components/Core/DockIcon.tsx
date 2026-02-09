@@ -30,8 +30,10 @@ const DockIcon: React.FC<DockIconProps> = ({ icon, isActive, onClick }) => {
         justifyContent: 'center',
         fontSize: '24px',
       }}
-      whileHover={{ scale: 1.1, backgroundColor: isActive ? theme.Color.Accent.Surface[1] : theme.Color.Base.Surface[2] }}
-      whileTap={{ scale: 0.95 }}
+      {...({
+        whileHover: { scale: 1.1, backgroundColor: isActive ? theme.Color.Accent.Surface[1] : theme.Color.Base.Surface[2] },
+        whileTap: { scale: 0.95 }
+      } as any)}
     >
       <i className={`ph-bold ${icon}`} />
     </motion.button>

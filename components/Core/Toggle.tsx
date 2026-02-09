@@ -49,9 +49,11 @@ const Toggle: React.FC<ToggleProps> = ({ label, isOn, onToggle }) => {
       <div style={trackStyle} onClick={onToggle}>
         <motion.div
           style={{ ...thumbStyle }}
-          initial={false}
-          animate={{ x: isOn ? 16 : 0 }}
-          transition={{ type: 'spring', stiffness: 700, damping: 30 }}
+          {...({
+            initial: false,
+            animate: { x: isOn ? 16 : 0 },
+            transition: { type: 'spring', stiffness: 700, damping: 30 }
+          } as any)}
         />
       </div>
     </div>

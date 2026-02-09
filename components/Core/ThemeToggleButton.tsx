@@ -52,23 +52,27 @@ const ThemeToggleButton = () => {
       style={styles.button}
       onClick={toggleTheme}
       aria-label={`Switch to ${themeName === 'light' ? 'dark' : 'light'} mode`}
-      whileHover={{ scale: 1.1, boxShadow: theme.effects['Effect.Shadow.Drop.2'] }}
-      whileTap={{ scale: 0.95 }}
-      whileDrag={{ scale: 1.1, cursor: 'grabbing', boxShadow: theme.effects['Effect.Shadow.Drop.3'] }}
-      drag
-      dragMomentum={false}
-      transition={{ duration: 0.2 }}
+      {...({
+        whileHover: { scale: 1.1, boxShadow: theme.effects['Effect.Shadow.Drop.2'] },
+        whileTap: { scale: 0.95 },
+        whileDrag: { scale: 1.1, cursor: 'grabbing', boxShadow: theme.effects['Effect.Shadow.Drop.3'] },
+        drag: true,
+        dragMomentum: false,
+        transition: { duration: 0.2 }
+      } as any)}
     >
       <AnimatePresence mode="wait" initial={false}>
         <motion.span
           key={themeName}
           className={themeName === 'dark' ? 'ph-bold ph-moon' : 'ph-bold ph-sun'}
           style={styles.icon}
-          variants={iconVariants}
-          initial="hidden"
-          animate="visible"
-          exit="exit"
-          transition={{ duration: 0.2, ease: 'easeInOut' }}
+          {...({
+             variants: iconVariants,
+             initial: "hidden",
+             animate: "visible",
+             exit: "exit",
+             transition: { duration: 0.2, ease: 'easeInOut' }
+          } as any)}
         />
       </AnimatePresence>
     </motion.button>

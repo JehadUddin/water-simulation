@@ -91,14 +91,16 @@ const StateLayer: React.FC<StateLayerProps> = ({
     return (
       <div style={containerStyle}>
         <motion.div 
-            initial={{ opacity: 0 }}
-            animate={{ opacity: opacity }}
             style={{
                 width: '100%',
                 height: '100%',
                 backgroundColor: color,
                 pointerEvents: 'none',
             }}
+            {...({
+              initial: { opacity: 0 },
+              animate: { opacity: opacity }
+            } as any)}
         />
       </div>
     );
@@ -119,18 +121,20 @@ const StateLayer: React.FC<StateLayerProps> = ({
                         left: currentX,
                         top: currentY,
                     }}
-                    initial={{ width: 0, height: 0 }}
-                    animate={{
-                        width: layer.isActive ? maxDiameter : 0,
-                        height: layer.isActive ? maxDiameter : 0,
-                    }}
-                    transition={{
-                        duration: 2.5,
-                        ease: [0.2, 0, 0, 1]
-                    }}
-                    onAnimationComplete={() => {
-                        if (!layer.isActive) removeLayer(layer.id);
-                    }}
+                    {...({
+                      initial: { width: 0, height: 0 },
+                      animate: {
+                          width: layer.isActive ? maxDiameter : 0,
+                          height: layer.isActive ? maxDiameter : 0,
+                      },
+                      transition: {
+                          duration: 2.5,
+                          ease: [0.2, 0, 0, 1]
+                      },
+                      onAnimationComplete: () => {
+                          if (!layer.isActive) removeLayer(layer.id);
+                      }
+                    } as any)}
                 />
              );
         })}

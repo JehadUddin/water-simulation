@@ -24,8 +24,10 @@ const Dock: React.FC<DockProps> = ({ windows, toggleWindow }) => {
 
     return (
       <motion.div
-        drag
-        dragMomentum={false}
+        {...({
+          drag: true,
+          dragMomentum: false
+        } as any)}
         style={{
           position: 'absolute',
           bottom: theme.spacing['Space.L'],
@@ -40,7 +42,7 @@ const Dock: React.FC<DockProps> = ({ windows, toggleWindow }) => {
           boxShadow: theme.effects['Effect.Shadow.Drop.3'],
           border: `1px solid ${theme.Color.Base.Surface[3]}`,
           zIndex: 1000,
-        }}
+        } as any}
       >
         {DOCK_ITEMS.map((item) => (
           <DockIcon
