@@ -1,6 +1,6 @@
 # React 18 Meta Prototype & Design System Starter Kit
 
-[**Remix on AI Studio**](https://ai.studio/apps/drive/1bzv80LRU42-ox3DhITxekZYpkAwRusxM?fullscreenApplet=true)
+[**Remix on AI Studio**](https://ai.studio/apps/drive/1WYqqbd5DDER7bue4-jyHmwA6AC6Fn65w?fullscreenApplet=true)
 
 This is a starter project for building modern, theme-aware React applications. It's set up with a modular structure, a powerful design system, and is ready for you to integrate the Gemini API.
 
@@ -89,10 +89,32 @@ Imagine you're building with LEGOs. This project gives you a super organized box
 ├── index.html
 ├── index.tsx
 ├── metadata.json
+├── package.json
 ```
 
-## How to Get Started
+## Installation & Local Development
 
-1.  Open the `index.html` file in a modern web browser.
-2.  That's it! The app will run.
-3.  Start changing the code in the `.tsx` files to build your own features.
+This project supports a standard Node.js development workflow using **Vite**.
+
+### Prerequisites
+- Node.js (v18 or newer recommended)
+- npm
+
+### Quick Start
+1.  **Install Dependencies**
+    ```bash
+    npm install
+    ```
+
+2.  **Start Development Server**
+    ```bash
+    npm run dev
+    ```
+    Open your browser to the URL shown (usually `http://localhost:5173`).
+
+3.  **Build for Production**
+    ```bash
+    npm run build
+    ```
+
+*Note: The project is dual-configured. It works in browser-based environments via `importmap` (CDNs) and locally via `package.json` (node_modules).*
